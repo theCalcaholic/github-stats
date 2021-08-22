@@ -3,6 +3,7 @@
 import asyncio
 import os
 from typing import Dict, List, Optional, Set, Tuple
+from traceback import print_exc
 
 import aiohttp
 import requests
@@ -85,8 +86,9 @@ class Queries(object):
                 result = await r.json()
                 if result is not None:
                     return result
-            except:
+            except Exception:
                 print("aiohttp failed for rest query")
+                print_exc()
                 # Fall back on non-async requests
                 async with self.semaphore:
                     r = requests.get(f"https://api.github.com/{path}",
@@ -451,12 +453,13 @@ Languages:
         """
         :return: count of total lines added, removed, or modified by the user
         """
+        print("lines_changed()")
         if self._lines_changed is not None:
             return self._lines_changed
         additions = 0
         deletions = 0
         for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            r = await self.queries.query_rest(f"/repos/{repo}/contributors")
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if (not isinstance(author_obj, dict)
@@ -484,7 +487,7 @@ Languages:
 
         total = 0
         for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/traffic/views")
+            r = await self.queries.query_rest(f"/user/repos/{repo}/traffic/views")
             for view in r.get("views", []):
                 total += view.get("count", 0)
 
