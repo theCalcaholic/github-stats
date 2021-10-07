@@ -36,7 +36,8 @@ jobs:
     - name: Generate images
       run: |
         [[ "$EXCLUDE_FORKED_REPOS" == 'true' ]] && echo 'excluding forked repos' || echo "not including forced repos"
-        echo "excluded repositories: ${EXCLUDED}"
+        echo "excluded repositories: " -n
+        echo "${EXCLUDED}" | base64
         python3 --version
         python3 generate_images.py
       env:
