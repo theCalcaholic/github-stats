@@ -38,6 +38,8 @@ jobs:
         [[ "$EXCLUDE_FORKED_REPOS" == 'true' ]] && echo 'excluding forked repos' || echo "not including forced repos"
         echo -n "excluded repositories: " 
         echo "${EXCLUDED}" | base64
+        echo -n "excluded languages: "
+        echo "${EXCLUDED_LANGS}" | base64
         python3 --version
         python3 generate_images.py
       env:
