@@ -82,6 +82,8 @@ class Queries(object):
         for _ in range(60):
             headers = {
                 "Authorization": f"token {self.access_token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Accept": "application/vnd.github+json",
             }
             if params is None:
                 params = dict()
@@ -144,6 +146,7 @@ class Queries(object):
         isFork: false,
         after: {"null" if owned_cursor is None else '"'+ owned_cursor +'"'}
     ) {{
+      totalCount
       pageInfo {{
         hasNextPage
         endCursor
@@ -180,6 +183,7 @@ class Queries(object):
         ]
         after: {"null" if contrib_cursor is None else '"'+ contrib_cursor +'"'}
     ) {{
+      totalCount
       pageInfo {{
         hasNextPage
         endCursor
@@ -311,7 +315,6 @@ Languages:
 
         self._get_stats_completed = asyncio.Event()
         await self._get_stats()
-        print("self._get_stats complete")
         self._get_stats_completed.set()
 
     async def _get_stats(self) -> None:
@@ -319,25 +322,26 @@ Languages:
         Get lots of summary statistics using one big query. Sets many attributes
         """
 
-        print("_get_stats()")
         stargazers = 0
         forks = 0
         languages = dict()
         repos = set()
+        name = None
 
         exclude_langs_lower = {x.lower() for x in self._exclude_langs}
 
         next_owned = None
         next_contrib = None
         while True:
-            print("get_stats_loop")
             raw_results = await self.queries.query(
                 Queries.repos_overview(
                     owned_cursor=next_owned, contrib_cursor=next_contrib
                 )
             )
-            print("raw results: ", raw_results)
             raw_results = raw_results if raw_results is not None else {}
+
+            repo_count = raw_results.get("data", {}).get("viewer", {}).get("repositories", {}).get("totalCount", 0) \
+                    + raw_results.get("data", {}).get("viewer", {}).get("repositoriesContributedTo", {}).get("totalCount", 0)
 
             name = raw_results.get("data", {}).get("viewer", {}).get("name", None)
             if name is None:
@@ -361,7 +365,8 @@ Languages:
                 fetched_repos += contrib_repos.get("nodes", [])
 
             for i, repo in enumerate(fetched_repos):
-                print(f"Fetching repo stats ({i}/{len(fetched_repos)})")
+                print(f"Fetching stats for repo ({i+1}/{repo_count})")
+
                 if repo is None:
                     continue
                 name = repo.get("nameWithOwner")
@@ -407,6 +412,7 @@ Languages:
         self._forks = forks
         self._languages = languages
         self._repos = repos
+        self._name = name
 
     @property
     async def name(self) -> str:
@@ -508,7 +514,6 @@ Languages:
         :return: count of total lines added, removed, or modified by the user
         """
         if self._lines_changed is not None:
-            print(self._lines_changed)
             return self._lines_changed
         additions = 0
         deletions = 0
@@ -519,7 +524,6 @@ Languages:
                 if not isinstance(author_obj, dict) or not isinstance(
                     author_obj.get("author", {}), dict
                 ):
-                    print("not a dict, skipping: ", author_obj)
                     continue
                 author = author_obj.get("author", {}).get("login", "")
                 if author != self.username:
