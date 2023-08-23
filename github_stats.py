@@ -3,6 +3,7 @@
 import asyncio
 import os
 from typing import Dict, List, Optional, Set, Tuple, Any, cast
+from traceback import print_exc
 
 import aiohttp
 import requests
@@ -53,6 +54,9 @@ class Queries(object):
                 return result
         except:
             print("aiohttp failed for GraphQL query")
+            query_indented = generated_query.replace('\n', '\n    ')
+            print(f"query was: '''\n    {query_indented}\n'''")
+            print_exc()
             # Fall back on non-async requests
             async with self.semaphore:
                 r_requests = requests.post(
@@ -72,6 +76,7 @@ class Queries(object):
         :param params: Query parameters to be passed to the API
         :return: deserialized REST JSON output
         """
+
 
         for _ in range(60):
             headers = {
@@ -99,6 +104,8 @@ class Queries(object):
                     return result
             except Exception:
                 print("aiohttp failed for rest query")
+                print(f"called like: query_rest('{path}', {'{'} {str(params)} {'}'}")
+                print_exc()
                 # Fall back on non-async requests
                 async with self.semaphore:
                     r_requests = requests.get(
@@ -485,7 +492,7 @@ Languages:
         additions = 0
         deletions = 0
         for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/contributors")
+            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if not isinstance(author_obj, dict) or not isinstance(
@@ -533,12 +540,18 @@ async def main() -> None:
     """
     access_token = os.getenv("ACCESS_TOKEN")
     user = os.getenv("GITHUB_ACTOR")
+    excluded = os.getenv("EXCLUDED")
+    ignore_forked_repos = os.getenv("EXCLUDE_FORKED_REPOS") == "true"
+    if excluded is not None:
+        exclude_repos = set(excluded.split(","))
     if access_token is None or user is None:
         raise RuntimeError(
             "ACCESS_TOKEN and GITHUB_ACTOR environment variables cannot be None!"
         )
     async with aiohttp.ClientSession() as session:
-        s = Stats(user, access_token, session)
+        s = Stats(user, access_token, session,
+                  exclude_repos=exclude_repos,
+                  ignore_forked_repos=ignore_forked_repos)
         print(await s.to_str())
 
 
