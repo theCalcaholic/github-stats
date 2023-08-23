@@ -39,6 +39,7 @@ class Queries(object):
         :param generated_query: string query to be sent to the API
         :return: decoded GraphQL JSON output
         """
+
         headers = {
             "Authorization": f"Bearer {self.access_token}",
         }
@@ -67,6 +68,7 @@ class Queries(object):
                 result = r_requests.json()
                 if result is not None:
                     return result
+
         return dict()
 
     async def query_rest(self, path: str, params: Optional[Dict] = None) -> Dict:
@@ -76,7 +78,6 @@ class Queries(object):
         :param params: Query parameters to be passed to the API
         :return: deserialized REST JSON output
         """
-
 
         for _ in range(60):
             headers = {
@@ -280,6 +281,7 @@ class Stats(object):
         self._repos: Optional[Set[str]] = None
         self._lines_changed: Optional[Tuple[int, int]] = None
         self._views: Optional[int] = None
+        self._get_stats_completed: Optional[asyncio.Event] = None
 
     async def to_str(self) -> str:
         """
@@ -303,29 +305,43 @@ Languages:
   - {formatted_languages}"""
 
     async def get_stats(self) -> None:
+        if self._get_stats_completed is not None:
+            await self._get_stats_completed.wait()
+            return
+
+        self._get_stats_completed = asyncio.Event()
+        await self._get_stats()
+        print("self._get_stats complete")
+        self._get_stats_completed.set()
+
+    async def _get_stats(self) -> None:
         """
         Get lots of summary statistics using one big query. Sets many attributes
         """
-        self._stargazers = 0
-        self._forks = 0
-        self._languages = dict()
-        self._repos = set()
+
+        print("_get_stats()")
+        stargazers = 0
+        forks = 0
+        languages = dict()
+        repos = set()
 
         exclude_langs_lower = {x.lower() for x in self._exclude_langs}
 
         next_owned = None
         next_contrib = None
         while True:
+            print("get_stats_loop")
             raw_results = await self.queries.query(
                 Queries.repos_overview(
                     owned_cursor=next_owned, contrib_cursor=next_contrib
                 )
             )
+            print("raw results: ", raw_results)
             raw_results = raw_results if raw_results is not None else {}
 
-            self._name = raw_results.get("data", {}).get("viewer", {}).get("name", None)
-            if self._name is None:
-                self._name = (
+            name = raw_results.get("data", {}).get("viewer", {}).get("name", None)
+            if name is None:
+                name = (
                     raw_results.get("data", {})
                     .get("viewer", {})
                     .get("login", "No Name")
@@ -340,23 +356,23 @@ Languages:
                 raw_results.get("data", {}).get("viewer", {}).get("repositories", {})
             )
 
-            repos = owned_repos.get("nodes", [])
+            fetched_repos = owned_repos.get("nodes", [])
             if not self._ignore_forked_repos:
-                repos += contrib_repos.get("nodes", [])
+                fetched_repos += contrib_repos.get("nodes", [])
 
-            for repo in repos:
+            for i, repo in enumerate(fetched_repos):
+                print(f"Fetching repo stats ({i}/{len(fetched_repos)})")
                 if repo is None:
                     continue
                 name = repo.get("nameWithOwner")
-                if name in self._repos or name in self._exclude_repos:
+                if name in repos or name in self._exclude_repos:
                     continue
-                self._repos.add(name)
-                self._stargazers += repo.get("stargazers").get("totalCount", 0)
-                self._forks += repo.get("forkCount", 0)
+                repos.add(name)
+                stargazers += repo.get("stargazers").get("totalCount", 0)
+                forks += repo.get("forkCount", 0)
 
                 for lang in repo.get("languages", {}).get("edges", []):
                     name = lang.get("node", {}).get("name", "Other")
-                    languages = await self.languages
                     if name.lower() in exclude_langs_lower:
                         continue
                     if name in languages:
@@ -383,9 +399,14 @@ Languages:
 
         # TODO: Improve languages to scale by number of contributions to
         #       specific filetypes
-        langs_total = sum([v.get("size", 0) for v in self._languages.values()])
-        for k, v in self._languages.items():
+        langs_total = sum([v.get("size", 0) for v in languages.values()])
+        for k, v in languages.items():
             v["prop"] = 100 * (v.get("size", 0) / langs_total)
+
+        self._stargazers = stargazers
+        self._forks = forks
+        self._languages = languages
+        self._repos = repos
 
     @property
     async def name(self) -> str:
@@ -486,8 +507,8 @@ Languages:
         """
         :return: count of total lines added, removed, or modified by the user
         """
-        print("lines_changed()")
         if self._lines_changed is not None:
+            print(self._lines_changed)
             return self._lines_changed
         additions = 0
         deletions = 0
@@ -498,6 +519,7 @@ Languages:
                 if not isinstance(author_obj, dict) or not isinstance(
                     author_obj.get("author", {}), dict
                 ):
+                    print("not a dict, skipping: ", author_obj)
                     continue
                 author = author_obj.get("author", {}).get("login", "")
                 if author != self.username:
